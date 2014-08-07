@@ -113,7 +113,7 @@ begin
   edit.PanFileName  := StatusBar1.Panels[4];  //panel para el nombre del archivo
   //al final se debe asignar al editor
   edit.InitEditor(SynEdit1,'SinNombre', 'txt');
-  edit.InitMenuRecents(mnRecientes);  //inicia el menú "Recientes"
+  edit.InitMenuRecents(mnRecientes, nil);  //inicia el menú "Recientes"
 end;
 
 procedure TForm1.FormCloseQuery(Sender: TObject; var CanClose: boolean);

@@ -40,6 +40,7 @@ type
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of String);
+    procedure FormShow(Sender: TObject);
     procedure mnCopyClick(Sender: TObject);
     procedure mnCutClick(Sender: TObject);
     procedure mnOpenClick(Sender: TObject);
@@ -51,6 +52,7 @@ type
     procedure mnUndoClick(Sender: TObject);
   private
     edit: TObjEditor;
+    ArcRecientes: TStringList;
   public
     { public declarations }
   end;
@@ -76,7 +78,12 @@ begin
   edit.PanFileName  := StatusBar1.Panels[4];  //panel para el nombre del archivo
   //al final se debe asignar al editor
   edit.InitEditor(SynEdit1,'NoName', 'txt');
-  edit.InitMenuRecents(mnRecents);  //inicia el menú "Recientes"
+  ArcRecientes := TStringList.Create;
+end;
+
+procedure TForm1.FormShow(Sender: TObject);
+begin
+  edit.InitMenuRecents(mnRecents, ArcRecientes);  //inicia el menú "Recientes"
 end;
 
 procedure TForm1.ChangeEditorState;
@@ -97,6 +104,7 @@ end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
+  ArcRecientes.Free;
   edit.Free;
 end;
 
@@ -106,6 +114,7 @@ begin
   if edit.SaveQuery then Exit;   //Verifica cambios
   edit.LoadFile(FileNames[0]);
 end;
+
 ////////////// Edit menu ////////////////
 procedure TForm1.mnUndoClick(Sender: TObject);
 begin

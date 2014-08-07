@@ -1,8 +1,9 @@
 object Form1: TForm1
-  Left = 225
+  Left = 323
   Height = 325
-  Top = 136
+  Top = 243
   Width = 516
+  AllowDropFiles = True
   Caption = 'Form1'
   ClientHeight = 305
   ClientWidth = 516

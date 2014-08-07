@@ -1,9 +1,15 @@
-{                                   UtilEditSyn 0.4
-* Se cambia el nombre al evento OnArchivoCargado().
-* Se crea la propiedad de solo lectur "Modified".
-* Se agrega la propiedad "canCopy".
-* Se agrega el evento OnSelectionChange(), como funcionalidad adicional.
-* Se corrige un error de desbordamiento que se podía producir en VerTipoArchivo().
+{                                UtilEditSyn 0.5
+* Se eliminan los métodos GuardarADisco() y LeerDeDisco(), y se hace pública la
+lista ArcRecientes, para que pueda ser guardada por un proceso externo.
+* Se cambia el nombre de la lista ArcRecientes a RecentFiles.
+* Se argega validación de archivo modificado, cuando se carga uno nuevo desde el
+menú de recientes.
+* Se agrega iniicalización de error a OpenDialog().
+* Se agrega la propiedad Text, para leer el contenido del editor sin incluir el
+salto de línea adicional que suele incluir TSynEdit.Text.
+* Se agrega parámetro a NewFile() que permita crear archivo nuevo sin preguntar.
+* Se agrega la rutina InitMenuLanguages(), para poder llenar unmenú con la lista de
+lenguajes disponibles.
 
                                   Modif. Por Tito Hinostroza 12/07/2014
 }
@@ -25,6 +31,7 @@ const
   MSG_OVERWRITE = 'File %s already exists.' + #13#10 +
                   'Overwrite?';
   MSG_RECENTS = '&Recents';
+  MSG_LANGUAGES = '&Languages';
   MSG_NO_RECENTS = 'No files';
   MSG_EDIT_NO_INIT = 'Internal: Not initialized Editor.';}
 {Mnnsajes en español}
@@ -39,6 +46,7 @@ const
   MSG_OVERWRITE = 'El archivo %s ya existe.' + #13#10 +
                   '¿Deseas sobreescribirlo?';
   MSG_RECENTS = '&Recientes';
+  MSG_LANGUAGES = '&Lenguajes';
   MSG_NO_RECENTS = 'No hay archivos';
   MSG_EDIT_NO_INIT = 'Error Interno: Editor no inicializado.';
 
@@ -66,17 +74,15 @@ type
     procedure menRecentsClick(Sender: TObject);
   private
     ed      : TSynEdit;  //referencia al editor
-    ArcRecientes: TStringList;  //Lista de archivos recientes
     menRecents: TMenuItem; //Menú de archivos recientes
+    menLanguages: TMenuItem; //Menú de lenguajes
     MaxRecents: integer;   //Máxima cantidad de archivos recientes
     procedure ActualMenusReciente;
     procedure AgregArcReciente(arch: string);
-    procedure ChangeFileInform;
-    procedure GuardarADisco(var arcINI: TIniFile; etiq: string='edit');
-    procedure LeerDeDisco(var arcINI: TIniFile; etiq: string='edit');
     //Estado de modificación
     procedure SetModified(valor: boolean);
     function GetModified: boolean;
+    function GetText: string;
   public
     NomArc  : string;    //nombre del archivo
     DelArc  : TDelArc;   //Tipo de delimitador de fin de línea
@@ -85,6 +91,7 @@ type
     Error   : string;    //mensaje de error en alguna operación
     extDef  : string;    //extensión por defecto para los archivos (txt, xml, ...)
     nomDef  : string;    //nombre por defecto pàra nuevos archivos
+    RecentFiles: TStringList;  //Lista de archivos recientes
     //eventos
     OnChangeEditorState:TEventoArchivo;  {Cuando cambia el estado de modificado, con opción
                           "Undo", con "Redo", con opción "Copiar", "Cortar", "Pegar"}
@@ -101,8 +108,11 @@ type
     PanForEndLin : TStatusPanel;  //Panel para mostrar el tipo de delimitador de línea
     PanCodifFile : TStatusPanel;  //Panel para mostrar la codificaión de archivo
     procedure InitEditor(ed0: TsynEdit; nomDef0, extDef0: string);
-    procedure InitMenuRecents(menRecents0: TMenuItem; MaxRecents0: integer=5);
-    procedure NewFile;
+    procedure InitMenuRecents(menRecents0: TMenuItem; RecentList: TStringList;
+      MaxRecents0: integer=5);
+    procedure InitMenuLanguages(menLanguage0: TMenuItem; LangPath: string;
+      TheCLickEvent: TNotifyEvent);
+    procedure NewFile(QuerySave: boolean=true);
     procedure LoadFile(arc8: string);
     procedure SaveFile;
     function OpenDialog(OpenDialog1: TOpenDialog): boolean;
@@ -122,7 +132,9 @@ type
     function CanCopy: boolean;
     function CanPaste: boolean;
 
-    property Modified: boolean read GetModified;
+    property Modified: boolean read GetModified write SetModified;
+    procedure ChangeFileInform;
+    property Text: string read GetText;  //devuelve el contenido real del editor
     constructor Create;
     destructor Destroy; override;
   end;
@@ -376,36 +388,40 @@ procedure TObjEditor.AgregArcReciente(arch: string);
 var hay: integer; //bandera-índice
     i: integer;
 begin
+  if RecentFiles = nil then exit;
   //verifica si ya existe
   hay := -1;   //valor inicial
-  for i:= 0 to ArcRecientes.Count-1 do
-    if ArcRecientes[i] = arch then hay := i;
+  for i:= 0 to RecentFiles.Count-1 do
+    if RecentFiles[i] = arch then hay := i;
   if hay = -1 then  //no existe
-    ArcRecientes.Insert(0,arch)  //agrega al inicio
+    RecentFiles.Insert(0,arch)  //agrega al inicio
   else begin //ya existe
-    ArcRecientes.Delete(hay);     //lo elimina
-    ArcRecientes.Insert(0,arch);  //lo agrega al inicio
+    RecentFiles.Delete(hay);     //lo elimina
+    RecentFiles.Insert(0,arch);  //lo agrega al inicio
   end;
-  while ArcRecientes.Count>MaxRecents do  //mantiene tamaño máximo
-    ArcRecientes.Delete(MaxRecents);
+  while RecentFiles.Count>MaxRecents do  //mantiene tamaño máximo
+    RecentFiles.Delete(MaxRecents);
 end;
 procedure TObjEditor.itemClick(Sender: TObject);
 //Se selecciona un archivo de la lista de recientes
 begin
-   LoadFile(MidStr(TMenuItem(Sender).Caption,4,150));
+  if SaveQuery then Exit;   //Verifica cambios
+  LoadFile(MidStr(TMenuItem(Sender).Caption,4,150));
 end;
 procedure TObjEditor.menRecentsClick(Sender: TObject);
 //Evento del menú de archivos recientes
 begin
   ActualMenusReciente;  //carga la lista de archivos recientes
 end;
-procedure TObjEditor.InitMenuRecents(menRecents0: TMenuItem; MaxRecents0: integer=5);
+procedure TObjEditor.InitMenuRecents(menRecents0: TMenuItem; RecentList: TStringList;
+                                     MaxRecents0: integer=5);
 //Configura un menú, con el historial de los archivos abiertos recientemente
 //"nRecents", es el número de archivos recientes que se guardará
 var item: TMenuItem;
   i: Integer;
 begin
   menRecents := menRecents0;
+  RecentFiles := RecentList;  //gaurda referencia a lista
   MaxRecents := MaxRecents0;
   //configura menú
   menRecents.Caption:= MSG_RECENTS;
@@ -417,6 +433,30 @@ begin
     menRecents.Add(item);
   end;
 end;
+procedure TObjEditor.InitMenuLanguages(menLanguage0: TMenuItem; LangPath: string;
+                        TheCLickEvent: TNotifyEvent);
+//Inicia un menú con la lista de archivos XML (que representan a lenguajes) que hay
+//en una carpeta en particular y les asigna un evento.
+var item: TMenuItem;
+  i: Integer;
+  Hay: Boolean;
+  SR : TSearchRec;
+begin
+  menLanguages := menLanguage0;
+  //configura menú
+  menLanguages.Caption:= MSG_LANGUAGES;
+  //explora archivos
+  Hay := FindFirst(LangPath + '\*.xml',faAnyFile - faDirectory, SR) = 0;
+  while Hay do begin
+     //encontró archivo
+     item := TMenuItem.Create(nil);
+     item.Caption:= '&'+ChangeFileExt(SR.name,'');  //nombre
+     item.OnClick:=TheCLickEvent;
+     menLanguages.Add(item);
+     //no encontró extensión, busca siguiente archivo
+     Hay := FindNext(SR) = 0;
+  end;
+end;
 procedure TObjEditor.ActualMenusReciente;
 {Actualiza el menú de archivos recientes con la lista de los archivos abiertos
 recientemente. }
@@ -424,8 +464,9 @@ var
   i: Integer;
 begin
   if menRecents = nil then exit;
+  if RecentFiles = nil then exit;
   //proteciión
-  if ArcRecientes.Count = 0 then begin
+  if RecentFiles.Count = 0 then begin
     menRecents[0].Caption:=MSG_NO_RECENTS;
     menRecents[0].Enabled:=false;
     for i:= 1 to menRecents.Count-1 do begin
@@ -436,33 +477,15 @@ begin
   //hace visible los ítems
   menRecents[0].Enabled:=true;
   for i:= 0 to menRecents.Count-1 do begin
-    if i<ArcRecientes.Count then
+    if i<RecentFiles.Count then
       menRecents[i].Visible:=true
     else
       menRecents[i].Visible:=false;
   end;
   //pone etiquetas a los menús, incluyendo un atajo numérico
-  for i:=0 to ArcRecientes.Count-1 do begin
-    menRecents[i].Caption := '&'+IntToStr(i+1)+' '+ArcRecientes[i];
+  for i:=0 to RecentFiles.Count-1 do begin
+    menRecents[i].Caption := '&'+IntToStr(i+1)+' '+RecentFiles[i];
   end;
-end;
-procedure TObjEditor.LeerDeDisco(var arcINI: TIniFile; etiq: string = 'edit');
-//Lee las propiedades de disco.
-//El parámetro "etiq", se usa para cuando se quiere guardar varios editores
-begin
-  //Lee archivos recientes
-  arcINI.ReadSection(etiq+'_Recientes',ArcRecientes);
-end;
-procedure TObjEditor.GuardarADisco(var arcINI: TIniFile;  etiq: string = 'edit');
-//lee las propiedades de disco
-//El parámetro "etiq", se usa para cuando se quiere guardar varios editores
-var
-  i : integer;
-begin
-  //Escribe archivos recientes
-  arcINI.EraseSection(etiq+'_Recientes');
-  for i:= 0 to ArcRecientes.Count-1 do
-    arcINI.WriteString(etiq+'_Recientes',ArcRecientes[i],'');
 end;
 
 procedure TObjEditor.SetModified(valor: boolean);
@@ -484,6 +507,15 @@ begin
   Result := ed.Modified;
 end;
 
+function TObjEditor.GetText: string;
+//Devuelve el contenido del editor, quitando el salto de línea final
+begin
+  Result := ed.Text;
+  if AnsiEndsStr(LineEnding, Result) then begin
+     Setlength(Result, length(Result)-length(LineEnding));
+  end;
+end;
+
 procedure TObjEditor.ChangeFileInform;
 //Se debe llamar siempre que puede cambiar la información de nombre de archivo, tipo de
 //delimitador de línea o tipo de codificación del archivo.
@@ -501,11 +533,14 @@ begin
   //dispara evento
   if OnChangeFileInform<>nil then OnChangeFileInform;
 end;
-procedure TObjEditor.NewFile;
+procedure TObjEditor.NewFile(QuerySave: boolean=true);
 //Inicia al editor con un nuevo nombre de archivo
+//"QuerySave" indica si se debe o no preguntar por archivo modificado
 begin
-  if SaveQuery then Exit;   //Verifica cambios
-  if Error<>'' then exit;  //hubo error
+  if QuerySave then begin
+    if SaveQuery then Exit;   //Verifica cambios
+    if Error<>'' then exit;  //hubo error
+  end;
   Error := '';    //limpia bandera de error
   if extDef<> '' then //genera nombre por defecto
     NomArc := nomDef + '.' + extDef
@@ -570,6 +605,7 @@ function TObjEditor.OpenDialog(OpenDialog1: TOpenDialog): boolean;
 //pedir confirmación para grabar el contenido actual.
 var arc0: string;
 begin
+  Error := '';
   if SaveQuery then Exit;   //Verifica cambios
   if Error<>'' then exit;  //hubo error
   if not OpenDialog1.Execute then exit;    //se canceló
@@ -694,12 +730,12 @@ end;
 
 constructor TObjEditor.Create;
 begin
-  ArcRecientes := TStringList.Create;
+//  RecentFiles := TStringList.Create;
   MaxRecents := 1;   //Inicia con 1
 end;
 destructor TObjEditor.Destroy;
 begin
-  ArcRecientes.Free;
+//  RecentFiles.Free;
   inherited Destroy;
 end;
 
